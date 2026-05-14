@@ -3595,8 +3595,21 @@ details-disclosure > details {
     transform: translateX(100%) scaleX(0);
   }
 }
+.product-card-wrapper .card__media {
+  height: 300px !important;
+}
+
+.product-card-wrapper .card__media img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+.card-wrapper .card__media {
+  height: 300px !important;
+}
+
 .card-wrapper .card__media img {
   width: 100% !important;
-  height: 300px !important;
+  height: 100% !important;
   object-fit: cover !important;
 }
