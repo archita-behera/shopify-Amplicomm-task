@@ -11,6 +11,8 @@ const renderedIds = new Set();
 const featuredProducts = [];
 const normalProducts = [];
 
+let normalOffset = 0;
+
 const root = document.getElementById('featured-collection-root');
 
 const featuredGrid = document.getElementById('fic-grid');
@@ -33,28 +35,35 @@ function init() {
   currentPage = Number(root.dataset.currentPage);
   totalPages = Number(root.dataset.totalPages);
 
-  const jsonEl = document.getElementById('collection-products-json');
+  const jsonEl = document.getElementById(
+    'collection-products-json'
+  );
 
-  const products = JSON.parse(jsonEl.textContent);
+  const products = JSON.parse(
+    jsonEl.textContent
+  );
 
-  const urlParams = new URLSearchParams(window.location.search);
+  const urlParams = new URLSearchParams(
+    window.location.search
+  );
 
   const sortBy = urlParams.get('sort_by');
 
-  const hasFilters = window.location.search.includes('filter.');
+  const hasFilters =
+    window.location.search.includes('filter.');
 
   const normalMode =
     (sortBy && sortBy !== 'manual') || hasFilters;
 
   if (normalMode) {
 
-    renderNormalProducts(products);
+    renderNormalMode(products);
 
   } else {
 
     separateProducts(products);
 
-    renderFeaturedProducts();
+    renderInitialProducts();
 
   }
 
@@ -92,12 +101,15 @@ function separateProducts(products) {
 
 }
 
-function renderFeaturedProducts() {
+function renderInitialProducts() {
 
   featuredLabel.style.display = 'block';
   divider.style.display = 'block';
 
-  featuredProducts.forEach(product => {
+  const featuredToShow =
+    featuredProducts.slice(0, 15);
+
+  featuredToShow.forEach(product => {
 
     renderedIds.add(product.id);
 
@@ -107,7 +119,11 @@ function renderFeaturedProducts() {
 
   });
 
-  const firstNormals = normalProducts.slice(0, 5);
+  const normalNeeded =
+    20 - featuredToShow.length;
+
+  const firstNormals =
+    normalProducts.slice(0, normalNeeded);
 
   firstNormals.forEach(product => {
 
@@ -119,13 +135,17 @@ function renderFeaturedProducts() {
 
   });
 
+  normalOffset = normalNeeded;
+
   updateCount();
 
 }
 
-function renderNormalProducts(products) {
+function renderNormalMode(products) {
 
-  products.forEach(product => {
+  const first20 = products.slice(0, 20);
+
+  first20.forEach(product => {
 
     if (renderedIds.has(product.id)) return;
 
@@ -136,6 +156,8 @@ function renderNormalProducts(products) {
     );
 
   });
+
+  updateCount();
 
 }
 
@@ -158,7 +180,7 @@ function setupInfiniteScroll(normalMode) {
     });
 
   }, {
-    rootMargin: '300px'
+    rootMargin: '1000px'
   });
 
   observer.observe(sentinel);
@@ -168,16 +190,6 @@ function setupInfiniteScroll(normalMode) {
 async function loadMoreProducts(normalMode) {
 
   if (loading || allLoaded) return;
-
-  if (currentPage >= totalPages) {
-
-    allLoaded = true;
-
-    endMsg.style.display = 'block';
-
-    return;
-
-  }
 
   loading = true;
 
@@ -210,7 +222,7 @@ async function loadMoreProducts(normalMode) {
       jsonEl.textContent
     );
 
-    let renderedCount = 0;
+    let renderCount = 0;
 
     products.forEach(product => {
 
@@ -218,19 +230,32 @@ async function loadMoreProducts(normalMode) {
         tag => tag.toLowerCase() === 'featured'
       );
 
-      if (!normalMode && isFeatured) return;
+      if (!normalMode && isFeatured) {
+
+        if (!renderedIds.has(product.id)) {
+
+          renderedIds.add(product.id);
+
+          featuredGrid.appendChild(
+            createCard(product, true)
+          );
+
+        }
+
+        return;
+      }
 
       if (renderedIds.has(product.id)) return;
 
       renderedIds.add(product.id);
 
-      if (renderedCount < 20) {
+      if (renderCount < 20) {
 
         normalGrid.appendChild(
           createCard(product, false)
         );
 
-        renderedCount++;
+        renderCount++;
 
       }
 
@@ -271,7 +296,10 @@ function createCard(product, featured = false) {
 
     <div class="fic-title">
 
-      ${featured ? '<div class="fic-badge">Featured</div>' : ''}
+      ${featured
+        ? '<div class="fic-badge">Featured</div>'
+        : ''
+      }
 
       ${product.title}
 

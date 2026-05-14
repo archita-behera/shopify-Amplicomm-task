@@ -1,4 +1,4 @@
-{% paginate collection.products by 100 %}
+{% paginate collection.products by 20 %}
 
 <div
   id="featured-collection-root"
@@ -16,7 +16,7 @@
           "handle": {{ product.handle | json }},
           "url": {{ product.url | json }},
           "tags": {{ product.tags | json }},
-          "featured_image": {{ product.featured_image | img_url: '500x500' | json }},
+          "featured_image": {{ product.featured_image | image_url: width: 500 | json }},
           "price": {{ product.price | money | json }},
           "compare_at_price": {{ product.compare_at_price | money | json }},
           "available": {{ product.available | json }}
@@ -28,12 +28,43 @@
   <div class="fic-toolbar">
 
     <div>
+
       <select id="fic-sort-select" onchange="ficHandleSort(this.value)">
-        <option value="manual">Featured</option>
-        <option value="best-selling">Best Selling</option>
-        <option value="price-ascending">Price Low → High</option>
-        <option value="price-descending">Price High → Low</option>
+
+        <option value="manual"
+          {% if collection.sort_by == blank %}
+            selected
+          {% endif %}
+        >
+          Featured
+        </option>
+
+        <option value="best-selling"
+          {% if collection.sort_by == 'best-selling' %}
+            selected
+          {% endif %}
+        >
+          Best Selling
+        </option>
+
+        <option value="price-ascending"
+          {% if collection.sort_by == 'price-ascending' %}
+            selected
+          {% endif %}
+        >
+          Price Low → High
+        </option>
+
+        <option value="price-descending"
+          {% if collection.sort_by == 'price-descending' %}
+            selected
+          {% endif %}
+        >
+          Price High → Low
+        </option>
+
       </select>
+
     </div>
 
     <div id="fic-product-count"></div>
@@ -60,7 +91,7 @@
     All products loaded
   </div>
 
-  <div id="fic-sentinel"></div>
+  <div id="fic-sentinel" style="height:100px;"></div>
 
 </div>
 
@@ -69,54 +100,71 @@
 <style>
 
 .fic-toolbar{
-display:flex;
-justify-content:space-between;
-margin-bottom:20px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:20px;
 }
 
 .fic-grid{
-display:grid;
-grid-template-columns:repeat(4,1fr);
-gap:20px;
-margin-bottom:30px;
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:20px;
+  margin-bottom:30px;
 }
 
 .fic-card{
-border:1px solid #eee;
-padding:10px;
-text-decoration:none;
-color:#000;
-display:block;
+  border:1px solid #eee;
+  padding:10px;
+  text-decoration:none;
+  color:#000;
+  display:block;
+  transition:0.3s;
+  background:#fff;
+}
+
+.fic-card:hover{
+  transform:translateY(-3px);
+  box-shadow:0 5px 20px rgba(0,0,0,0.08);
 }
 
 .fic-card img{
-width:100%;
-height:250px;
-object-fit:cover;
+  width:100%;
+  height:250px;
+  object-fit:cover;
 }
 
 .fic-title{
-font-size:14px;
-margin-top:10px;
+  font-size:14px;
+  margin-top:10px;
 }
 
 .fic-price{
-font-weight:bold;
-margin-top:5px;
+  font-weight:bold;
+  margin-top:5px;
 }
 
 .fic-badge{
-display:inline-block;
-background:#ffc107;
-padding:4px 10px;
-font-size:12px;
-margin-bottom:8px;
+  display:inline-block;
+  background:#ffc107;
+  padding:4px 10px;
+  font-size:12px;
+  margin-bottom:8px;
 }
 
 #fic-loader,
 #fic-end-msg{
-text-align:center;
-padding:20px;
+  text-align:center;
+  padding:20px;
+  font-size:16px;
+}
+
+@media screen and (max-width:768px){
+
+  .fic-grid{
+    grid-template-columns:repeat(2,1fr);
+  }
+
 }
 
 </style>
