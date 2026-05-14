@@ -1,358 +1,320 @@
 /**
- * Featured Collection - Infinite Scroll
- * 
- * Logic:
- * 1. If no filters/sort active → FEATURED MODE
- *    - Fetch all featured products first (tag:featured)
- *    - Then lazy-load non-featured in pages of 20
- * 2. If filters/sort active → NORMAL MODE
- *    - Standard infinite scroll, no pinning
+ * Featured Collection Infinite Scroll
+ * ─────────────────────────────────────────────────────────────
+ * FEATURED MODE (no sort/filter):
+ *   1. Fetch ALL tagged-"featured" products → render at top
+ *   2. Infinite scroll loads non-featured in batches of 20
+ *   3. De-dup via Set — featured never appear again
+ *
+ * NORMAL MODE (sort or filter active):
+ *   - Standard paginated infinite scroll, no pinning
+ * ─────────────────────────────────────────────────────────────
  */
-
 (function () {
   'use strict';
 
-  // ─── Config ───────────────────────────────────────────────────────────────
-  const COLLECTION_HANDLE = window.COLLECTION_HANDLE || '';
-  const COLLECTION_MODE   = window.COLLECTION_MODE   || 'normal';
-  const CURRENT_SORT      = window.CURRENT_SORT      || '';
-  const PAGE_SIZE         = 20;
-  const FEATURED_TAG      = 'featured';
+  /* ── Read globals set by Liquid ── */
+  const HANDLE   = window.COLLECTION_HANDLE || '';
+  const MODE     = window.COLLECTION_MODE   || 'featured';
+  const SORT     = window.CURRENT_SORT      || '';
+  const TAG      = 'featured';
+  const PER_PAGE = 20;
 
-  // ─── State ────────────────────────────────────────────────────────────────
-  const shownProductIds = new Set();  // All IDs already rendered (dedup guard)
-  let nonFeaturedPage   = 1;          // Current page for non-featured products
-  let isLoading         = false;
-  let allLoaded         = false;
-  let featuredLoaded    = false;
+  /* ── State ── */
+  const seen   = new Set();   // product IDs already in DOM
+  let nfPage   = 1;           // next non-featured page to fetch
+  let loading  = false;
+  let done     = false;
 
-  // ─── DOM refs ─────────────────────────────────────────────────────────────
-  const productGrid      = document.getElementById('product-grid');
-  const featuredSection  = document.getElementById('featured-section');
-  const regularSection   = document.getElementById('regular-section');
-  const spinner          = document.getElementById('loading-spinner');
-  const noMore           = document.getElementById('no-more-products');
-  const trigger          = document.getElementById('load-more-trigger');
+  // Normal mode pagination
+  let normalPage = (window.FC_CURRENT_PAGE || 1);
 
-  // ─── Init ─────────────────────────────────────────────────────────────────
-  if (COLLECTION_MODE === 'featured') {
-    initFeaturedMode();
+  /* ── DOM ── */
+  const grid    = document.getElementById('fc-product-grid');
+  const featSec = document.getElementById('fc-featured-section');
+  const regSec  = document.getElementById('fc-regular-section');
+  const spinner = document.getElementById('fc-spinner');
+  const noMore  = document.getElementById('fc-no-more');
+  const trigger = document.getElementById('fc-trigger');
+
+  /* ── Boot ── */
+  if (MODE === 'featured') {
+    bootFeatured();
   } else {
-    initNormalMode();
+    bootNormal();
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // FEATURED MODE
-  // ══════════════════════════════════════════════════════════════════════════
+  /* ════════════════════════════════════════════════════════════
+     FEATURED MODE
+  ════════════════════════════════════════════════════════════ */
 
-  async function initFeaturedMode() {
-    showSpinner();
+  async function bootFeatured() {
+    show(spinner);
 
-    // Step 1: Fetch ALL featured products (all pages, tag: featured)
-    const featuredProducts = await fetchAllFeaturedProducts();
-    renderProducts(featuredProducts, featuredSection, true);
-    featuredLoaded = true;
+    /* 1 — Grab every featured product (handles >250 via looping) */
+    const featured = await fetchAllByTag(TAG);
 
-    // Step 2: Calculate how many non-featured to show initially
-    // Total initial = 20, featured already shown = featuredProducts.length
-    // If featured >= 20, show 0 non-featured initially (load on scroll)
-    const initialNonFeaturedCount = Math.max(0, PAGE_SIZE - featuredProducts.length);
-
-    if (initialNonFeaturedCount > 0) {
-      // We need to load enough non-featured to fill 20 slots
-      await loadNonFeaturedBatch(initialNonFeaturedCount);
+    /* 2 — Render featured section label + cards */
+    if (featured.length > 0) {
+      appendLabel('⭐ Featured Products', featSec);
+      renderCards(featured, featSec, true);
     }
 
-    hideSpinner();
-    setupIntersectionObserver();
+    /* 3 — Fill remainder of first "page" with non-featured */
+    const need = Math.max(0, PER_PAGE - featured.length);
+    if (need > 0) {
+      await loadNonFeatured(need);
+    }
+
+    hide(spinner);
+    observeTrigger();
   }
 
-  /**
-   * Fetch ALL products tagged 'featured' across all pages
-   * Uses /collections/{handle}/products.json?tag=featured
-   * Shopify returns max 250 per page
-   */
-  async function fetchAllFeaturedProducts() {
-    const allFeatured = [];
+  /* Fetch ALL products with a specific tag (paginates if >250) */
+  async function fetchAllByTag(tag) {
+    const all = [];
     let page = 1;
-    let hasMore = true;
 
-    while (hasMore) {
-      const url = `/collections/${COLLECTION_HANDLE}/products.json?tag=${FEATURED_TAG}&limit=250&page=${page}`;
-      const data = await fetchJSON(url);
-      const products = data.products || [];
+    while (true) {
+      const url =
+        `/collections/${HANDLE}/products.json` +
+        `?tag=${encodeURIComponent(tag)}&limit=250&page=${page}`;
+      const { products = [] } = await getJSON(url);
 
-      allFeatured.push(...products);
+      products.forEach(p => { seen.add(p.id); });
+      all.push(...products);
 
-      if (products.length < 250) {
-        hasMore = false;
-      } else {
-        page++;
-      }
+      if (products.length < 250) break;
+      page++;
     }
-
-    return allFeatured;
+    return all;
   }
 
-  /**
-   * Load a batch of non-featured products
-   * Skips any product IDs already shown (dedup)
-   */
-  async function loadNonFeaturedBatch(limit = PAGE_SIZE) {
-    if (isLoading || allLoaded) return;
-    isLoading = true;
-    showSpinner();
+  /* Load `limit` non-featured products, skipping anything in `seen` */
+  async function loadNonFeatured(limit = PER_PAGE) {
+    if (loading || done) return;
+    loading = true;
+    show(spinner);
 
-    // We may need to fetch extra pages to get enough non-featured
-    // because some products on a page might already be in shownProductIds
     const batch = [];
-    let localPage = nonFeaturedPage;
 
     while (batch.length < limit) {
-      const url = buildCollectionUrl(localPage);
-      const data = await fetchJSON(url);
-      const products = data.products || [];
+      const url =
+        `/collections/${HANDLE}/products.json` +
+        `?limit=${PER_PAGE}&page=${nfPage}` +
+        (SORT ? `&sort_by=${SORT}` : '');
 
-      if (products.length === 0) {
-        allLoaded = true;
-        break;
-      }
+      const { products = [] } = await getJSON(url);
 
-      for (const product of products) {
-        // Skip if already shown (featured product appearing again, or duplicate)
-        if (!shownProductIds.has(product.id)) {
-          // Also skip if it's a featured product (already at top)
-          if (!product.tags || !product.tags.includes(FEATURED_TAG)) {
-            batch.push(product);
+      if (products.length === 0) { done = true; break; }
+
+      for (const p of products) {
+        if (!seen.has(p.id)) {
+          /* extra safety: skip if tagged featured (already at top) */
+          const tags = Array.isArray(p.tags)
+            ? p.tags
+            : (p.tags || '').split(',').map(t => t.trim());
+          if (tags.includes(TAG)) {
+            seen.add(p.id); // mark seen, don't render again
           } else {
-            // It's featured but appearing in normal pages — mark as seen, skip
-            shownProductIds.add(product.id);
+            batch.push(p);
           }
         }
       }
 
-      localPage++;
-
-      // If Shopify returned fewer than limit, we've reached the end
-      if (products.length < PAGE_SIZE) {
-        allLoaded = true;
-        break;
-      }
-
-      // Safety: don't over-fetch
-      if (localPage > 500) break;
+      nfPage++;
+      if (products.length < PER_PAGE) { done = true; break; }
+      if (nfPage > 1000) { done = true; break; } // hard safety cap
     }
 
-    nonFeaturedPage = localPage;
-
-    // Render only what we need (in case we fetched extra)
-    const toRender = batch.slice(0, limit);
-    renderProducts(toRender, regularSection, false);
-
-    hideSpinner();
-    isLoading = false;
-
-    if (allLoaded && noMore) {
-      noMore.style.display = 'block';
+    /* Add "Regular Products" label once, before first batch */
+    if (batch.length > 0 && regSec && !regSec.dataset.labeled) {
+      appendLabel('All Products', regSec);
+      regSec.dataset.labeled = '1';
     }
+
+    renderCards(batch.slice(0, limit), regSec, false);
+
+    hide(spinner);
+    loading = false;
+
+    if (done) showNoMore();
   }
 
-  function buildCollectionUrl(page) {
-    let url = `/collections/${COLLECTION_HANDLE}/products.json?limit=${PAGE_SIZE}&page=${page}`;
-    if (CURRENT_SORT) {
-      url += `&sort_by=${CURRENT_SORT}`;
-    }
-    return url;
-  }
+  /* ════════════════════════════════════════════════════════════
+     NORMAL MODE  (sort / filter active — no pinning)
+  ════════════════════════════════════════════════════════════ */
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // NORMAL MODE (filters/sort active)
-  // ══════════════════════════════════════════════════════════════════════════
-
-  function initNormalMode() {
-    // Products already rendered by Liquid
-    // Just set up infinite scroll for subsequent pages
-    document.querySelectorAll('.product-card[data-id]').forEach(el => {
-      shownProductIds.add(el.dataset.id);
+  function bootNormal() {
+    /* Mark already-rendered cards as seen */
+    document.querySelectorAll('#fc-product-grid .fc-card').forEach(el => {
+      if (el.dataset.id) seen.add(Number(el.dataset.id));
     });
-
-    setupIntersectionObserver();
+    observeTrigger();
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // RENDERING
-  // ══════════════════════════════════════════════════════════════════════════
+  async function loadNormalPage() {
+    if (loading || done) return;
+    loading = true;
+    show(spinner);
 
-  function renderProducts(products, container, isFeatured) {
-    if (!products || products.length === 0) return;
+    normalPage++;
 
-    const fragment = document.createDocumentFragment();
-
-    products.forEach(product => {
-      if (shownProductIds.has(product.id)) return; // Dedup guard
-      shownProductIds.add(product.id);
-
-      const card = buildProductCard(product, isFeatured);
-      fragment.appendChild(card);
-    });
-
-    (container || productGrid).appendChild(fragment);
-  }
-
-  function buildProductCard(product, isFeatured) {
-    const card = document.createElement('div');
-    card.className = 'product-card';
-    card.dataset.id = product.id;
-
-    const imageUrl = product.images && product.images[0]
-      ? product.images[0].src.replace(/(\.\w+)$/, '_400x$1')
-      : null;
-
-    const price = formatMoney(product.variants[0]?.price || 0);
-    const productUrl = `/products/${product.handle}`;
-
-    card.innerHTML = `
-      <a href="${productUrl}">
-        ${imageUrl
-          ? `<img src="${imageUrl}" alt="${escapeHtml(product.title)}" loading="lazy">`
-          : `<div style="height:220px;background:#f5f5f5;display:flex;align-items:center;justify-content:center;color:#999;">No Image</div>`
-        }
-      </a>
-      <div class="product-card-info">
-        ${isFeatured ? '<span class="featured-badge">⭐ Featured</span>' : ''}
-        <div class="product-card-title">
-          <a href="${productUrl}" style="color:inherit;text-decoration:none;">${escapeHtml(product.title)}</a>
-        </div>
-        <div class="product-card-price">${price}</div>
-      </div>
-    `;
-
-    return card;
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // INTERSECTION OBSERVER (Infinite Scroll)
-  // ══════════════════════════════════════════════════════════════════════════
-
-  function setupIntersectionObserver() {
-    if (!trigger) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting && !isLoading && !allLoaded) {
-            if (COLLECTION_MODE === 'featured') {
-              loadNonFeaturedBatch(PAGE_SIZE);
-            } else {
-              loadNormalNextPage();
-            }
-          }
-        });
-      },
-      { rootMargin: '200px' } // Trigger 200px before reaching bottom
-    );
-
-    observer.observe(trigger);
-  }
-
-  // Normal mode: load next page using section rendering
-  async function loadNormalNextPage() {
-    if (isLoading || allLoaded) return;
-    isLoading = true;
-    showSpinner();
-
-    const url = new URL(window.location.href);
-    const currentPage = parseInt(url.searchParams.get('page') || '1');
-    url.searchParams.set('page', currentPage + 1);
-    url.searchParams.set('section_id', 'featured-collection');
+    /* Build URL preserving current filters & sort */
+    const base = new URL(window.location.href);
+    base.searchParams.set('page', normalPage);
+    base.searchParams.set('section_id', 'custom-featured-collection');
 
     try {
-      const html = await fetch(url.toString()).then(r => r.text());
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-      const newCards = doc.querySelectorAll('.product-card');
+      const html = await fetch(base.toString()).then(r => r.text());
+      const doc  = new DOMParser().parseFromString(html, 'text/html');
+      const cards = doc.querySelectorAll('#fc-product-grid .fc-card');
 
-      if (newCards.length === 0) {
-        allLoaded = true;
-        if (noMore) noMore.style.display = 'block';
+      if (cards.length === 0) {
+        done = true;
+        showNoMore();
       } else {
-        newCards.forEach(card => {
-          if (!shownProductIds.has(card.dataset.id)) {
-            shownProductIds.add(card.dataset.id);
-            productGrid.appendChild(card);
+        cards.forEach(card => {
+          const id = Number(card.dataset.id);
+          if (!seen.has(id)) {
+            seen.add(id);
+            grid.appendChild(card);
           }
         });
-        history.replaceState(null, '', url.toString());
       }
-    } catch (err) {
-      console.error('Failed to load next page:', err);
+    } catch (e) {
+      console.error('[FC] Normal page load error:', e);
+      normalPage--; // allow retry
     }
 
-    hideSpinner();
-    isLoading = false;
+    hide(spinner);
+    loading = false;
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // SORT & FILTER HANDLERS
-  // ══════════════════════════════════════════════════════════════════════════
+  /* ════════════════════════════════════════════════════════════
+     RENDER HELPERS
+  ════════════════════════════════════════════════════════════ */
 
-  window.handleSortChange = function (value) {
-    const url = new URL(window.location.href);
-    url.searchParams.set('sort_by', value);
-    url.searchParams.delete('page');
-    window.location.href = url.toString();
+  function renderCards(products, container, isFeatured) {
+    if (!products.length) return;
+    const frag = document.createDocumentFragment();
+
+    products.forEach(p => {
+      if (seen.has(p.id)) return;
+      seen.add(p.id);
+      frag.appendChild(buildCard(p, isFeatured));
+    });
+
+    (container || grid).appendChild(frag);
+  }
+
+  function buildCard(p, isFeatured) {
+    const div  = document.createElement('div');
+    div.className  = 'fc-card';
+    div.dataset.id = p.id;
+
+    /* Best quality image at 400px wide */
+    const rawSrc = p.images?.[0]?.src || '';
+    const imgSrc = rawSrc
+      ? rawSrc.replace(/(\.[a-z]+)(\?|$)/i, '_400x$1$2')
+      : '';
+
+    /* Price: Shopify returns cents as string */
+    const cents = p.variants?.[0]?.price || '0';
+    const price = '₹' + (parseFloat(cents)).toFixed(2);
+
+    div.innerHTML = `
+      <a href="/products/${esc(p.handle)}" class="fc-card-img-wrap">
+        ${imgSrc
+          ? `<img src="${esc(imgSrc)}" alt="${esc(p.title)}" loading="lazy">`
+          : `<div class="fc-no-img">No Image</div>`}
+      </a>
+      <div class="fc-card-body">
+        ${isFeatured ? '<span class="fc-badge">⭐ Featured</span>' : ''}
+        <div class="fc-card-title">
+          <a href="/products/${esc(p.handle)}">${esc(p.title)}</a>
+        </div>
+        <div class="fc-card-price">${price}</div>
+      </div>`;
+
+    return div;
+  }
+
+  function appendLabel(text, container) {
+    const el = document.createElement('div');
+    el.className = 'fc-section-label';
+    el.textContent = text;
+    (container || grid).appendChild(el);
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     INTERSECTION OBSERVER
+  ════════════════════════════════════════════════════════════ */
+
+  function observeTrigger() {
+    if (!trigger) return;
+
+    new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && !loading && !done) {
+        MODE === 'featured' ? loadNonFeatured(PER_PAGE) : loadNormalPage();
+      }
+    }, { rootMargin: '300px' }).observe(trigger);
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     SORT & FILTER  (page-reload approach — simplest & correct)
+  ════════════════════════════════════════════════════════════ */
+
+  window.fcHandleSortChange = function (val) {
+    const u = new URL(window.location.href);
+    if (val === 'manual' || val === '') {
+      u.searchParams.delete('sort_by');
+    } else {
+      u.searchParams.set('sort_by', val);
+    }
+    u.searchParams.delete('page');
+    window.location.href = u.toString();
   };
 
-  window.handleFilterChange = function () {
-    // Collect all active checkboxes
-    const url = new URL(window.location.href);
-    // Clear old filter params
-    const filterInputs = document.querySelectorAll('.filter-options input[type="checkbox"]');
-    const paramGroups = {};
+  window.fcHandleFilterChange = function () {
+    const u = new URL(window.location.href);
+    const inputs = document.querySelectorAll('.fc-filter-options input[type=checkbox]');
+    const groups = {};
 
-    filterInputs.forEach(input => {
-      if (!paramGroups[input.name]) paramGroups[input.name] = [];
-      if (input.checked) paramGroups[input.name].push(input.value);
+    inputs.forEach(i => {
+      if (!groups[i.name]) groups[i.name] = [];
+      if (i.checked) groups[i.name].push(i.value);
     });
 
-    // Rebuild URL params
-    filterInputs.forEach(input => url.searchParams.delete(input.name));
-    Object.entries(paramGroups).forEach(([name, values]) => {
-      values.forEach(v => url.searchParams.append(name, v));
-    });
+    inputs.forEach(i => u.searchParams.delete(i.name));
+    Object.entries(groups).forEach(([k, vals]) =>
+      vals.forEach(v => u.searchParams.append(k, v))
+    );
 
-    url.searchParams.delete('page');
-    window.location.href = url.toString();
+    u.searchParams.delete('page');
+    window.location.href = u.toString();
   };
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // UTILITIES
-  // ══════════════════════════════════════════════════════════════════════════
+  /* ════════════════════════════════════════════════════════════
+     UTILS
+  ════════════════════════════════════════════════════════════ */
 
-  async function fetchJSON(url) {
-    const response = await fetch(url, {
-      headers: { 'Content-Type': 'application/json' }
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
-    return response.json();
+  async function getJSON(url) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`${r.status} ${url}`);
+    return r.json();
   }
 
-  function formatMoney(cents) {
-    return '₹' + (parseFloat(cents) / 100).toFixed(2);
+  function esc(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
   }
 
-  function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.appendChild(document.createTextNode(str || ''));
-    return div.innerHTML;
-  }
-
-  function showSpinner() {
-    if (spinner) spinner.style.display = 'block';
-  }
-
-  function hideSpinner() {
-    if (spinner) spinner.style.display = 'none';
-  }
+  function show(el) { if (el) el.style.display = 'block'; }
+  function hide(el) { if (el) el.style.display = 'none';  }
+  function showNoMore() { if (noMore) noMore.style.display = 'block'; }
 
 })();

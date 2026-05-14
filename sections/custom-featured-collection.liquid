@@ -1,217 +1,254 @@
 {% comment %} Featured Collection with Infinite Scroll {% endcomment %}
 
-<div class="collection-header">
-  <h1>{{ collection.title }}</h1>
-  
-  {%- comment -%} Sorting {%- endcomment -%}
-  <div class="sort-filter-bar">
-    <select id="sort-by" onchange="handleSortChange(this.value)">
-      <option value="manual" {% if collection.sort_by == 'manual' %}selected{% endif %}>Featured</option>
-      <option value="best-selling" {% if collection.sort_by == 'best-selling' %}selected{% endif %}>Best Selling</option>
-      <option value="price-ascending" {% if collection.sort_by == 'price-ascending' %}selected{% endif %}>Price: Low → High</option>
-      <option value="price-descending" {% if collection.sort_by == 'price-descending' %}selected{% endif %}>Price: High → Low</option>
-    </select>
-    
-    {%- comment -%} Active filters display {%- endcomment -%}
-    <div id="active-filters">
-      {% for filter in collection.filters %}
-        {% for value in filter.active_values %}
-          <span class="filter-tag">
-            {{ filter.label }}: {{ value.label }}
-            <a href="{{ value.url_to_remove }}">✕</a>
-          </span>
-        {% endfor %}
-      {% endfor %}
-    </div>
-  </div>
-  
-  {%- comment -%} Filter sidebar/dropdowns {%- endcomment -%}
-  <div class="filters-wrapper">
-    {% for filter in collection.filters %}
-      <details class="filter-group">
-        <summary>{{ filter.label }}</summary>
-        <div class="filter-options">
-          {% for value in filter.values %}
-            <label>
-              <input type="checkbox" 
-                     name="{{ filter.param_name }}" 
-                     value="{{ value.value }}"
-                     {% if value.active %}checked{% endif %}
-                     onchange="handleFilterChange()">
-              {{ value.label }} ({{ value.count }})
-            </label>
-          {% endfor %}
-        </div>
-      </details>
-    {% endfor %}
-  </div>
-</div>
-
-{% comment %} Check if any sort/filter is active {% endcomment %}
+{% comment %} — Detect active filters — {% endcomment %}
 {% assign has_active_filters = false %}
 {% for filter in collection.filters %}
-  {% for value in filter.active_values %}
+  {% if filter.active_values.size > 0 %}
     {% assign has_active_filters = true %}
-  {% endfor %}
+  {% endif %}
 {% endfor %}
+
 {% assign is_sorted = false %}
-{% if collection.sort_by != 'manual' and collection.sort_by != '' %}
+{% if collection.sort_by != 'manual' and collection.sort_by != '' and collection.sort_by != blank %}
   {% assign is_sorted = true %}
 {% endif %}
 
+{% assign is_normal_mode = false %}
 {% if has_active_filters or is_sorted %}
-  {% comment %} NORMAL MODE: Filters/Sort active → standard Shopify pagination {% endcomment %}
-  <div id="product-grid" class="product-grid">
-    {% paginate collection.products by 20 %}
-      {% for product in collection.products %}
-        {% render 'product-card', product: product %}
-      {% endfor %}
-    {% endpaginate %}
-  </div>
-  <div id="load-more-trigger"></div>
-  <div id="loading-spinner" style="display:none;">Loading...</div>
-  
-  <script>
-    window.COLLECTION_MODE = 'normal';
-    window.COLLECTION_HANDLE = '{{ collection.handle }}';
-    window.CURRENT_SORT = '{{ collection.sort_by }}';
-    window.CURRENT_URL = '{{ request.path }}{{ request.search }}';
-  </script>
-
-{% else %}
-  {% comment %} FEATURED MODE: No filters → featured products pinned to top {% endcomment %}
-  <div id="product-grid" class="product-grid">
-    {% comment %} Products will be injected by JavaScript {% endcomment %}
-    <div id="featured-section">
-      <p class="section-label">⭐ Featured Products</p>
-    </div>
-    <div id="regular-section"></div>
-  </div>
-  
-  <div id="load-more-trigger"></div>
-  <div id="loading-spinner" style="display:none;">
-    <div class="spinner"></div>
-    <p>Loading more products...</p>
-  </div>
-  <div id="no-more-products" style="display:none;">No more products</div>
-
-  <script>
-    window.COLLECTION_MODE = 'featured';
-    window.COLLECTION_HANDLE = '{{ collection.handle }}';
-    window.CURRENT_SORT = '{{ collection.sort_by }}';
-  </script>
+  {% assign is_normal_mode = true %}
 {% endif %}
 
+{% comment %} — Set JS variables BEFORE loading JS — {% endcomment %}
+<script>
+  window.COLLECTION_HANDLE = '{{ collection.handle }}';
+  window.CURRENT_SORT      = '{{ collection.sort_by }}';
+  window.COLLECTION_MODE   = '{% if is_normal_mode %}normal{% else %}featured{% endif %}';
+</script>
+
+{% comment %} ─── UI: Header + Sort + Filters ─── {% endcomment %}
+<div class="fc-wrapper">
+
+  <div class="fc-header">
+    <h1 class="fc-title">{{ collection.title }}</h1>
+
+    <div class="fc-toolbar">
+      <select id="fc-sort-by" onchange="fcHandleSortChange(this.value)">
+        <option value="manual"          {% if collection.sort_by == 'manual'          or collection.sort_by == blank %}selected{% endif %}>Featured</option>
+        <option value="best-selling"    {% if collection.sort_by == 'best-selling'    %}selected{% endif %}>Best Selling</option>
+        <option value="price-ascending" {% if collection.sort_by == 'price-ascending' %}selected{% endif %}>Price: Low → High</option>
+        <option value="price-descending"{% if collection.sort_by == 'price-descending'%}selected{% endif %}>Price: High → Low</option>
+      </select>
+
+      <div id="fc-active-filters">
+        {% for filter in collection.filters %}
+          {% for value in filter.active_values %}
+            <span class="fc-filter-tag">
+              {{ filter.label }}: {{ value.label }}
+              <a href="{{ value.url_to_remove }}">✕</a>
+            </span>
+          {% endfor %}
+        {% endfor %}
+      </div>
+    </div>
+
+    {% comment %} Filter groups {% endcomment %}
+    {% if collection.filters.size > 0 %}
+    <div class="fc-filters">
+      {% for filter in collection.filters %}
+        <details class="fc-filter-group">
+          <summary>{{ filter.label }}</summary>
+          <div class="fc-filter-options">
+            {% for value in filter.values %}
+              <label>
+                <input type="checkbox"
+                       name="{{ filter.param_name }}"
+                       value="{{ value.value }}"
+                       {% if value.active %}checked{% endif %}
+                       onchange="fcHandleFilterChange()">
+                {{ value.label }} ({{ value.count }})
+              </label>
+            {% endfor %}
+          </div>
+        </details>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  {% comment %} ─── NORMAL MODE: sort/filter active ─── {% endcomment %}
+  {% if is_normal_mode %}
+    {% paginate collection.products by 20 %}
+      <div id="fc-product-grid" class="fc-grid">
+        {% for product in collection.products %}
+          <div class="fc-card" data-id="{{ product.id }}">
+            <a href="{{ product.url }}" class="fc-card-img-wrap">
+              {% if product.featured_image %}
+                <img src="{{ product.featured_image | img_url: '400x' }}"
+                     alt="{{ product.featured_image.alt | escape }}"
+                     loading="lazy">
+              {% else %}
+                <div class="fc-no-img">No Image</div>
+              {% endif %}
+            </a>
+            <div class="fc-card-body">
+              {% if product.tags contains 'featured' %}
+                <span class="fc-badge">⭐ Featured</span>
+              {% endif %}
+              <div class="fc-card-title">
+                <a href="{{ product.url }}">{{ product.title }}</a>
+              </div>
+              <div class="fc-card-price">{{ product.price | money }}</div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+
+      {% comment %} Store pagination info for JS {% endcomment %}
+      <script>
+        window.FC_TOTAL_PAGES  = {{ paginate.pages }};
+        window.FC_CURRENT_PAGE = {{ paginate.current_page }};
+      </script>
+    {% endpaginate %}
+
+    <div id="fc-trigger"></div>
+    <div id="fc-spinner" style="display:none"><div class="fc-spin"></div><p>Loading...</p></div>
+    <div id="fc-no-more" style="display:none">You've seen all products</div>
+
+  {% comment %} ─── FEATURED MODE: no sort/filter ─── {% endcomment %}
+  {% else %}
+    <div id="fc-product-grid" class="fc-grid">
+      <div id="fc-featured-section" style="display:contents"></div>
+      <div id="fc-regular-section"  style="display:contents"></div>
+    </div>
+
+    <div id="fc-trigger"></div>
+    <div id="fc-spinner" style="display:none"><div class="fc-spin"></div><p>Loading...</p></div>
+    <div id="fc-no-more" style="display:none">You've seen all products</div>
+
+    <script>
+      window.FC_TOTAL_PAGES  = null;
+      window.FC_CURRENT_PAGE = 1;
+    </script>
+  {% endif %}
+
+</div>
+
+{% comment %} ─── STYLES ─── {% endcomment %}
 <style>
-.product-grid {
+*, *::before, *::after { box-sizing: border-box; }
+
+.fc-wrapper { max-width: 1400px; margin: 0 auto; padding: 0 20px 60px; }
+
+.fc-title { font-size: 28px; font-weight: 700; margin: 20px 0 12px; }
+
+.fc-toolbar {
+  display: flex; gap: 12px; align-items: center;
+  flex-wrap: wrap; margin-bottom: 14px;
+}
+
+#fc-sort-by {
+  padding: 8px 14px; border: 1px solid #ccc;
+  border-radius: 6px; font-size: 14px; cursor: pointer;
+  background: #fff;
+}
+
+.fc-filter-tag {
+  background: #f0f0f0; padding: 4px 12px;
+  border-radius: 20px; font-size: 13px;
+}
+.fc-filter-tag a { margin-left: 6px; color: #666; text-decoration: none; }
+
+.fc-filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+
+.fc-filter-group summary {
+  cursor: pointer; padding: 7px 14px;
+  border: 1px solid #ddd; border-radius: 6px; font-size: 14px;
+  list-style: none; user-select: none;
+}
+
+.fc-filter-options {
+  position: absolute; z-index: 100;
+  background: #fff; border: 1px solid #ddd;
+  border-radius: 6px; padding: 10px 14px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.1);
+  min-width: 180px;
+}
+.fc-filter-group { position: relative; }
+
+.fc-filter-options label {
+  display: flex; gap: 8px; align-items: center;
+  padding: 5px 0; font-size: 14px; cursor: pointer;
+}
+
+/* ── Grid ── */
+.fc-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 20px;
-  padding: 20px 0;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 22px;
+  margin-top: 10px;
 }
-.product-card {
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  overflow: hidden;
-  transition: transform 0.2s, box-shadow 0.2s;
+
+/* ── Card ── */
+.fc-card {
+  border: 1px solid #e8e8e8; border-radius: 10px;
+  overflow: hidden; background: #fff;
+  transition: transform .2s, box-shadow .2s;
+  display: flex; flex-direction: column;
 }
-.product-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+.fc-card:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0,0,0,.1); }
+
+.fc-card-img-wrap { display: block; overflow: hidden; }
+.fc-card-img-wrap img {
+  width: 100%; height: 220px;
+  object-fit: cover; display: block;
+  transition: transform .3s;
 }
-.product-card img {
-  width: 100%;
-  height: 220px;
-  object-fit: cover;
+.fc-card:hover .fc-card-img-wrap img { transform: scale(1.04); }
+
+.fc-no-img {
+  height: 220px; background: #f5f5f5;
+  display: flex; align-items: center;
+  justify-content: center; color: #aaa; font-size: 14px;
 }
-.product-card-info {
-  padding: 12px;
+
+.fc-card-body { padding: 12px 14px 16px; }
+
+.fc-badge {
+  display: inline-block; background: #FFD700;
+  color: #333; font-size: 11px; font-weight: 700;
+  padding: 2px 10px; border-radius: 20px; margin-bottom: 6px;
 }
-.product-card-title {
-  font-weight: 600;
-  margin-bottom: 6px;
-  font-size: 15px;
-}
-.product-card-price {
-  color: #444;
-  font-size: 14px;
-}
-.featured-badge {
-  background: #FFD700;
-  color: #333;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 20px;
-  display: inline-block;
-  margin-bottom: 6px;
-}
-.section-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #888;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin: 10px 0 5px;
-  grid-column: 1 / -1;
-}
-#featured-section, #regular-section {
-  display: contents;
-}
-.sort-filter-bar {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-  margin: 16px 0;
-}
-#sort-by {
-  padding: 8px 12px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 14px;
-}
-.filter-tag {
-  background: #f0f0f0;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 13px;
-}
-.filter-group summary {
-  cursor: pointer;
-  padding: 8px 12px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 14px;
-}
-.filter-options {
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-top: none;
-  border-radius: 0 0 6px 6px;
-}
-.filter-options label {
-  display: flex;
-  gap: 8px;
-  padding: 4px 0;
-  cursor: pointer;
-  font-size: 14px;
-}
-#loading-spinner {
-  text-align: center;
-  padding: 30px;
-}
-.spinner {
-  width: 36px;
-  height: 36px;
-  border: 3px solid #eee;
-  border-top-color: #333;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+
+.fc-card-title { font-size: 14px; font-weight: 600; margin-bottom: 5px; line-height: 1.4; }
+.fc-card-title a { color: inherit; text-decoration: none; }
+.fc-card-title a:hover { text-decoration: underline; }
+
+.fc-card-price { color: #555; font-size: 14px; font-weight: 500; }
+
+/* ── Spinner ── */
+#fc-spinner { text-align: center; padding: 40px; }
+.fc-spin {
+  width: 38px; height: 38px;
+  border: 3px solid #eee; border-top-color: #555;
+  border-radius: 50%; animation: fcspin .8s linear infinite;
   margin: 0 auto 10px;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
-#load-more-trigger { height: 1px; }
+@keyframes fcspin { to { transform: rotate(360deg); } }
+
+#fc-no-more {
+  text-align: center; padding: 30px;
+  color: #999; font-size: 14px;
+}
+#fc-trigger { height: 2px; }
+
+/* ── Section label ── */
+.fc-section-label {
+  grid-column: 1 / -1;
+  font-size: 12px; font-weight: 700; letter-spacing: 1.5px;
+  text-transform: uppercase; color: #999;
+  padding: 4px 0 8px; border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 4px;
+}
 </style>
 
 <script src="{{ 'featured-infinite-scroll.js' | asset_url }}" defer></script>
