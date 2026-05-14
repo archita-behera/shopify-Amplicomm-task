@@ -1,3 +1,5 @@
+
+{% paginate collection.products by 20 %}
 <div
   id="featured-collection-root"
   data-collection-handle="{{ collection.handle }}"
@@ -74,7 +76,7 @@
   </div>
 
 </div>
-
+{% endpaginate %}
 {%- comment -%} Inject our JS {%- endcomment -%}
 <script src="{{ 'featured-infinite-scroll.js' | asset_url }}" defer></script>
 
