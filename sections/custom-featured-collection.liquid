@@ -1,186 +1,217 @@
-{% paginate collection.products by 20 %}
+{% comment %} Featured Collection with Infinite Scroll {% endcomment %}
 
-<div
-  id="featured-collection-root"
-  data-collection-handle="{{ collection.handle }}"
-  data-current-page="{{ paginate.current_page }}"
-  data-total-pages="{{ paginate.pages }}"
->
-
-  <script id="collection-products-json" type="application/json">
-    [
-      {%- for product in collection.products -%}
-        {
-          "id": {{ product.id | json }},
-          "title": {{ product.title | json }},
-          "handle": {{ product.handle | json }},
-          "url": {{ product.url | json }},
-          "tags": {{ product.tags | json }},
-          "featured_image": {{ product.featured_image | image_url: width: 500 | json }},
-          "price": {{ product.price | money | json }},
-          "compare_at_price": {{ product.compare_at_price | money | json }},
-          "available": {{ product.available | json }}
-        }{% unless forloop.last %},{% endunless %}
-      {%- endfor -%}
-    ]
-  </script>
-
-  <div class="fic-toolbar">
-
-    <div>
-
-      <select id="fic-sort-select" onchange="ficHandleSort(this.value)">
-
-        <option value="manual"
-          {% if collection.sort_by == blank %}
-            selected
-          {% endif %}
-        >
-          Featured
-        </option>
-
-        <option value="best-selling"
-          {% if collection.sort_by == 'best-selling' %}
-            selected
-          {% endif %}
-        >
-          Best Selling
-        </option>
-
-        <option value="price-ascending"
-          {% if collection.sort_by == 'price-ascending' %}
-            selected
-          {% endif %}
-        >
-          Price Low → High
-        </option>
-
-        <option value="price-descending"
-          {% if collection.sort_by == 'price-descending' %}
-            selected
-          {% endif %}
-        >
-          Price High → Low
-        </option>
-
-      </select>
-
+<div class="collection-header">
+  <h1>{{ collection.title }}</h1>
+  
+  {%- comment -%} Sorting {%- endcomment -%}
+  <div class="sort-filter-bar">
+    <select id="sort-by" onchange="handleSortChange(this.value)">
+      <option value="manual" {% if collection.sort_by == 'manual' %}selected{% endif %}>Featured</option>
+      <option value="best-selling" {% if collection.sort_by == 'best-selling' %}selected{% endif %}>Best Selling</option>
+      <option value="price-ascending" {% if collection.sort_by == 'price-ascending' %}selected{% endif %}>Price: Low → High</option>
+      <option value="price-descending" {% if collection.sort_by == 'price-descending' %}selected{% endif %}>Price: High → Low</option>
+    </select>
+    
+    {%- comment -%} Active filters display {%- endcomment -%}
+    <div id="active-filters">
+      {% for filter in collection.filters %}
+        {% for value in filter.active_values %}
+          <span class="filter-tag">
+            {{ filter.label }}: {{ value.label }}
+            <a href="{{ value.url_to_remove }}">✕</a>
+          </span>
+        {% endfor %}
+      {% endfor %}
     </div>
-
-    <div id="fic-product-count"></div>
-
   </div>
-
-  <div id="fic-featured-label" style="display:none;">
-    <h2>⭐ Featured Products</h2>
+  
+  {%- comment -%} Filter sidebar/dropdowns {%- endcomment -%}
+  <div class="filters-wrapper">
+    {% for filter in collection.filters %}
+      <details class="filter-group">
+        <summary>{{ filter.label }}</summary>
+        <div class="filter-options">
+          {% for value in filter.values %}
+            <label>
+              <input type="checkbox" 
+                     name="{{ filter.param_name }}" 
+                     value="{{ value.value }}"
+                     {% if value.active %}checked{% endif %}
+                     onchange="handleFilterChange()">
+              {{ value.label }} ({{ value.count }})
+            </label>
+          {% endfor %}
+        </div>
+      </details>
+    {% endfor %}
   </div>
-
-  <div id="fic-grid" class="fic-grid"></div>
-
-  <div id="fic-divider" style="display:none;">
-    <h2>All Products</h2>
-  </div>
-
-  <div id="fic-normal-grid" class="fic-grid"></div>
-
-  <div id="fic-loader" style="display:none;">
-    Loading products...
-  </div>
-
-  <div id="fic-end-msg" style="display:none;">
-    All products loaded
-  </div>
-
-  <div id="fic-sentinel" style="height:100px;"></div>
-
 </div>
 
-<script src="{{ 'featured-infinite-scroll.js' | asset_url }}" defer></script>
+{% comment %} Check if any sort/filter is active {% endcomment %}
+{% assign has_active_filters = false %}
+{% for filter in collection.filters %}
+  {% for value in filter.active_values %}
+    {% assign has_active_filters = true %}
+  {% endfor %}
+{% endfor %}
+{% assign is_sorted = false %}
+{% if collection.sort_by != 'manual' and collection.sort_by != '' %}
+  {% assign is_sorted = true %}
+{% endif %}
+
+{% if has_active_filters or is_sorted %}
+  {% comment %} NORMAL MODE: Filters/Sort active → standard Shopify pagination {% endcomment %}
+  <div id="product-grid" class="product-grid">
+    {% paginate collection.products by 20 %}
+      {% for product in collection.products %}
+        {% render 'product-card', product: product %}
+      {% endfor %}
+    {% endpaginate %}
+  </div>
+  <div id="load-more-trigger"></div>
+  <div id="loading-spinner" style="display:none;">Loading...</div>
+  
+  <script>
+    window.COLLECTION_MODE = 'normal';
+    window.COLLECTION_HANDLE = '{{ collection.handle }}';
+    window.CURRENT_SORT = '{{ collection.sort_by }}';
+    window.CURRENT_URL = '{{ request.path }}{{ request.search }}';
+  </script>
+
+{% else %}
+  {% comment %} FEATURED MODE: No filters → featured products pinned to top {% endcomment %}
+  <div id="product-grid" class="product-grid">
+    {% comment %} Products will be injected by JavaScript {% endcomment %}
+    <div id="featured-section">
+      <p class="section-label">⭐ Featured Products</p>
+    </div>
+    <div id="regular-section"></div>
+  </div>
+  
+  <div id="load-more-trigger"></div>
+  <div id="loading-spinner" style="display:none;">
+    <div class="spinner"></div>
+    <p>Loading more products...</p>
+  </div>
+  <div id="no-more-products" style="display:none;">No more products</div>
+
+  <script>
+    window.COLLECTION_MODE = 'featured';
+    window.COLLECTION_HANDLE = '{{ collection.handle }}';
+    window.CURRENT_SORT = '{{ collection.sort_by }}';
+  </script>
+{% endif %}
 
 <style>
-
-.fic-toolbar{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  margin-bottom:20px;
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 20px;
+  padding: 20px 0;
 }
-
-.fic-grid{
-  display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:20px;
-  margin-bottom:30px;
+.product-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+  transition: transform 0.2s, box-shadow 0.2s;
 }
-
-.fic-card{
-  border:1px solid #eee;
-  padding:10px;
-  text-decoration:none;
-  color:#000;
-  display:block;
-  transition:0.3s;
-  background:#fff;
+.product-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.12);
 }
-
-.fic-card:hover{
-  transform:translateY(-3px);
-  box-shadow:0 5px 20px rgba(0,0,0,0.08);
+.product-card img {
+  width: 100%;
+  height: 220px;
+  object-fit: cover;
 }
-
-.fic-card img{
-  width:100%;
-  height:250px;
-  object-fit:cover;
+.product-card-info {
+  padding: 12px;
 }
-
-.fic-title{
-  font-size:14px;
-  margin-top:10px;
+.product-card-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  font-size: 15px;
 }
-
-.fic-price{
-  font-weight:bold;
-  margin-top:5px;
+.product-card-price {
+  color: #444;
+  font-size: 14px;
 }
-
-.fic-badge{
-  display:inline-block;
-  background:#ffc107;
-  padding:4px 10px;
-  font-size:12px;
-  margin-bottom:8px;
+.featured-badge {
+  background: #FFD700;
+  color: #333;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
+  display: inline-block;
+  margin-bottom: 6px;
 }
-
-#fic-loader,
-#fic-end-msg{
-  text-align:center;
-  padding:20px;
-  font-size:16px;
+.section-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 10px 0 5px;
+  grid-column: 1 / -1;
 }
-
-@media screen and (max-width:768px){
-
-  .fic-grid{
-    grid-template-columns:repeat(2,1fr);
-  }
-
+#featured-section, #regular-section {
+  display: contents;
 }
-
+.sort-filter-bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+#sort-by {
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.filter-tag {
+  background: #f0f0f0;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 13px;
+}
+.filter-group summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.filter-options {
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+}
+.filter-options label {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 14px;
+}
+#loading-spinner {
+  text-align: center;
+  padding: 30px;
+}
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid #eee;
+  border-top-color: #333;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto 10px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#load-more-trigger { height: 1px; }
 </style>
 
-{% endpaginate %}
-
-{% schema %}
-{
-  "name": "Featured Collection",
-  "tag": "section",
-  "class": "featured-collection-section",
-  "settings": [],
-  "presets": [
-    {
-      "name": "Featured Collection"
-    }
-  ]
-}
-{% endschema %}
+<script src="{{ 'featured-collection.js' | asset_url }}" defer></script>
