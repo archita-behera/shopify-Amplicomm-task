@@ -1,6 +1,7 @@
 {{ 'template-collection.css' | asset_url | stylesheet_tag }}
 {{ 'component-card.css' | asset_url | stylesheet_tag }}
 {{ 'component-price.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'featured-products.js' | asset_url }}" defer="defer"></script>
 
 {% if section.settings.image_shape == 'blob' %}
   {{ 'mask-blobs.css' | asset_url | stylesheet_tag }}
@@ -146,6 +147,7 @@
             <ul
               id="product-grid"
               data-id="{{ section.id }}"
+              data-collection-handle="{{ collection.handle }}"
               class="
                 grid product-grid grid--{{ section.settings.columns_mobile }}-col-tablet-down
                 grid--{{ section.settings.columns_desktop }}-col-desktop
@@ -153,7 +155,7 @@
               "
             >
               {% assign skip_card_product_styles = false %}
-              {%- for product in collection.products -%}
+              {% comment %} {%- for product in collection.products -%}
                 {% assign lazy_load = false %}
                 {%- if forloop.index > 2 -%}
                   {%- assign lazy_load = true -%}
@@ -179,12 +181,50 @@
                   %}
                 </li>
                 {%- assign skip_card_product_styles = true -%}
-              {%- endfor -%}
-            </ul>
+              {%- endfor -%} {% endcomment %}
 
-            {%- if paginate.pages > 1 -%}
-              {% render 'pagination', paginate: paginate, anchor: '' %}
-            {%- endif -%}
+              {% for product in collection.products %}
+
+  <li
+    class="grid__item"
+    data-product-id="{{ product.id }}"
+    data-featured="{% if product.tags contains 'featured' %}true{% else %}false{% endif %}"
+  >
+
+    {% render 'card-product',
+      card_product: product,
+      media_aspect_ratio: section.settings.image_ratio,
+      image_shape: section.settings.image_shape,
+      show_secondary_image: section.settings.show_secondary_image,
+      show_vendor: section.settings.show_vendor,
+      show_rating: section.settings.show_rating,
+      lazy_load: true,
+      skip_styles: skip_card_product_styles,
+      quick_add: section.settings.quick_add,
+      section_id: section.id
+    %}
+
+  </li>
+
+{% endfor %}
+            </ul>
+<div
+  id="load-more-trigger"
+  style="
+    height: 50px;
+    width: 100%;
+    margin-top: 20px;
+  "
+>
+</div>
+          <div
+  id="collection-pagination"
+  
+>
+  {%- if paginate.pages > 1 -%}
+    {% render 'pagination', paginate: paginate, anchor: '' %}
+  {%- endif -%}
+</div>
           </div>
         {%- endif -%}
       </div>
@@ -206,7 +246,7 @@
       "min": 8,
       "max": 36,
       "step": 4,
-      "default": 16,
+      "default": 20,
       "label": "t:sections.main-collection-product-grid.settings.products_per_page.label"
     },
     {
