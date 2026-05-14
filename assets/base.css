@@ -3595,7 +3595,7 @@ details-disclosure > details {
     transform: translateX(100%) scaleX(0);
   }
 }
-.grid__item .media img {
+.card-wrapper .card__media img {
   width: 100% !important;
   height: 300px !important;
   object-fit: cover !important;
