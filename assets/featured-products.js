@@ -1,56 +1,248 @@
-// document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
 
-//   const grid = document.getElementById('product-grid');
+  const grid = document.getElementById('product-grid');
 
-//   if (!grid) return;
+  if (!grid) return;
 
-//   const hasSortOrFilter =
-//     window.location.search.includes('sort_by') ||
-//     window.location.search.includes('filter');
+  
+  grid.style.opacity = '0';
 
-//   // sorting/filtering pe normal Shopify behavior
-//   if (hasSortOrFilter) return;
+  const pagination =
+    document.getElementById('collection-pagination');
 
-//   const products = [...grid.querySelectorAll('.grid__item')];
+  const hasSortOrFilter =
+    window.location.search.includes('sort_by') ||
+    window.location.search.includes('filter');
 
-//   const featured = [];
-//   const normal = [];
+  if (hasSortOrFilter) {
 
-//   const renderedProducts = new Set();
+    grid.style.opacity = '1';
 
-//   products.forEach(product => {
+    if (pagination) {
+      pagination.style.display = 'block';
+    }
 
-//     const isFeatured =
-//       product.dataset.featured === 'true';
+    return;
+  }
 
-//     const productId =
-//       product.dataset.productId;
+  
+  if (pagination) {
+    pagination.style.display = 'none';
+  }
 
-//     if (renderedProducts.has(productId)) {
-//       product.remove();
-//       return;
-//     }
+  const collectionHandle =
+    grid.dataset.collectionHandle;
 
-//     renderedProducts.add(productId);
+  const renderedProducts = new Set();
 
-//     if (isFeatured) {
-//       featured.push(product);
-//     } else {
-//       normal.push(product);
-//     }
+  let featuredProducts = [];
+  let normalProducts = [];
 
-//   });
+  let loading = false;
 
-//   grid.innerHTML = '';
+  async function fetchProducts(page) {
 
-//   // first 15 featured
-//   featured.slice(0, 15).forEach(product => {
-//     grid.appendChild(product);
-//   });
+    const response = await fetch(
+      `/collections/${collectionHandle}/products.json?limit=20&page=${page}`
+    );
 
-//   // then 5 normal
-//   normal.slice(0, 5).forEach(product => {
-//     grid.appendChild(product);
-//   });
+    const data = await response.json();
 
-// });
+    return data.products;
+  }
+
+  function createProductCard(product) {
+
+    return `
+      <li class="grid__item">
+
+        <div class="card-wrapper">
+
+          <div class="card card--standard">
+
+            <div class="card__inner">
+
+              <img
+                src="${product.images[0]?.src || ''}"
+                alt="${product.title}"
+                style="width:100%;"
+              >
+
+            </div>
+
+            <div class="card__content">
+
+              <h3 style="margin-top:10px;">
+
+                ${product.title}
+
+                ${
+                  product.tags.includes('featured')
+                    ? '<span style="color:red;font-size:12px;"> FEATURED</span>'
+                    : ''
+                }
+
+              </h3>
+
+              <p>
+                Rs. ${product.variants[0].price} INR
+              </p>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      </li>
+    `;
+  }
+
+
+  function renderProducts(products) {
+
+    products.forEach(product => {
+
+   
+      if (renderedProducts.has(product.id)) {
+        return;
+      }
+
+      renderedProducts.add(product.id);
+
+      grid.innerHTML += createProductCard(product);
+
+    });
+
+  }
+
+  let page = 1;
+
+  while (true) {
+
+    const products = await fetchProducts(page);
+
+    if (!products.length) {
+      break;
+    }
+
+    products.forEach(product => {
+
+      const isFeatured =
+        product.tags.includes('featured');
+
+      if (isFeatured) {
+
+        const alreadyExists =
+          featuredProducts.some(
+            item => item.id === product.id
+          );
+
+        if (
+          !alreadyExists &&
+          featuredProducts.length < 15
+        ) {
+
+          featuredProducts.push(product);
+
+        }
+
+      } else {
+
+        const alreadyExists =
+          normalProducts.some(
+            item => item.id === product.id
+          );
+
+        if (!alreadyExists) {
+
+          normalProducts.push(product);
+
+        }
+
+      }
+
+    });
+
+    page++;
+
+  }
+
+
+  const initialNormal =
+    normalProducts.slice(0, 5);
+
+  let remainingNormalProducts =
+    normalProducts.slice(5);
+
+  grid.innerHTML = '';
+
+ 
+  renderProducts(featuredProducts);
+
+  renderProducts(initialNormal);
+
+  
+  grid.style.opacity = '1';
+
+
+  function loadMoreProducts() {
+
+    if (loading) return;
+
+    loading = true;
+
+  
+    const nextProducts =
+      remainingNormalProducts.slice(0, 20);
+
+  
+    remainingNormalProducts =
+      remainingNormalProducts.slice(20);
+
+    setTimeout(() => {
+
+      if (nextProducts.length > 0) {
+
+        renderProducts(nextProducts);
+
+      }
+
+      loading = false;
+
+    }, 1200);
+
+  }
+
+
+
+  const trigger =
+    document.getElementById('load-more-trigger');
+
+  const observer =
+    new IntersectionObserver(
+
+      (entries) => {
+
+        if (entries[0].isIntersecting) {
+
+          loadMoreProducts();
+
+        }
+
+      },
+
+      {
+        rootMargin: '100px'
+      }
+
+    );
+
+ 
+  setTimeout(() => {
+
+    observer.observe(trigger);
+
+  }, 1000);
+
+});
