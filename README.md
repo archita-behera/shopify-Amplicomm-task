@@ -85,3 +85,10 @@ Solution:
 
 ```bash
 shopify theme dev
+
+## preview link here
+https://amplicomm-solutions.myshopify.com/collections/all-products?preview_theme_id=161578483931
+
+
+## GitHub repository link here
+https://github.com/archita-behera/shopify-Amplicomm-task
