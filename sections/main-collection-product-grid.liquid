@@ -225,6 +225,7 @@
               {{ featured_products }}
               {{ normal_products }}
             </ul>
+            <div id="load-more-trigger"></div>
 
             {%- if paginate.pages > 1 -%}
               {% render 'pagination', paginate: paginate, anchor: '' %}
