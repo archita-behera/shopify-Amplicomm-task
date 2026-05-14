@@ -3595,15 +3595,8 @@ details-disclosure > details {
     transform: translateX(100%) scaleX(0);
   }
 }
-.card__media,
-.card__inner,
-.media {
-  height: 300px !important;
-}
-
-.card__media img,
-.media img {
+.grid__item .media img {
   width: 100% !important;
-  height: 100% !important;
+  height: 300px !important;
   object-fit: cover !important;
 }
