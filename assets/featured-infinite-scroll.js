@@ -125,9 +125,7 @@ function renderFeaturedProducts() {
 
 function renderNormalProducts(products) {
 
-  const firstBatch = products.slice(0, 20);
-
-  firstBatch.forEach(product => {
+  products.forEach(product => {
 
     if (renderedIds.has(product.id)) return;
 
@@ -160,7 +158,7 @@ function setupInfiniteScroll(normalMode) {
     });
 
   }, {
-    rootMargin: '1000px'
+    rootMargin: '300px'
   });
 
   observer.observe(sentinel);
